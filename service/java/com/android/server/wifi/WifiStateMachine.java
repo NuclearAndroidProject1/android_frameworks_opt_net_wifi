@@ -213,10 +213,10 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
     private int mNumScanResultsReturned;
 
     private boolean mScreenOn = false;
+    private int mCurrentAssociateNetworkId = -1;
 
     private boolean mIsWiFiIpReachabilityEnabled ;
 
-    private int mCurrentAssociateNetworkId = -1;
     /* Chipset supports background scan */
     private final boolean mBackgroundScanSupported;
 
@@ -853,9 +853,6 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
        a saved/open network in suspend mode */
     static final int CMD_PNO_PERIODIC_SCAN                              = BASE + 165;
 
-    /* Is IBSS mode supported by the driver? */
-    static final int CMD_GET_IBSS_SUPPORTED                             = BASE + 200;
-
     /* Wifi state machine modes of operation */
     /* CONNECT_MODE - connect to any 'known' AP when it becomes available */
     public static final int CONNECT_MODE = 1;
@@ -863,6 +860,9 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
     public static final int SCAN_ONLY_MODE = 2;
     /* SCAN_ONLY_WITH_WIFI_OFF - scan, but don't connect to any APs */
     public static final int SCAN_ONLY_WITH_WIFI_OFF_MODE = 3;
+
+    /* Is IBSS mode supported by the driver? */
+    static final int CMD_GET_IBSS_SUPPORTED  
 
     private static final int SUCCESS = 1;
     private static final int FAILURE = -1;
@@ -3620,6 +3620,21 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
                     + " suppState:" + mSupplicantStateTracker.getSupplicantStateName());
         }
         enableRssiPolling(screenOn);
+        if (screenOn) {
+            if (mContext.getResources().getBoolean(R.bool.wifi_autocon)) {
+                if (!shouldAutoConnect()) {
+                    if (DBG) {
+                        logd("Don't auto connect skip enable networks if screen on");
+                    }
+                } else {
+                    if (!mWifiConfigStore.enableAutoJoinWhenAssociated.get()) {
+                        enableAllNetworks();
+                    }
+                }
+            } else {
+               enableAllNetworks();
+            }
+        }
         if (mUserWantsSuspendOpt.get()) {
             if (screenOn) {
                 sendMessage(CMD_SET_SUSPEND_OPT_ENABLED, 0, 0);
@@ -3803,6 +3818,15 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
 
         if (mWifiNative.setBand(band)) {
             mFrequencyBand.set(band);
+            mWifiConfigStore.setConfiguredBand(band);
+            if (mFrequencyBand.get() == WifiManager.WIFI_FREQUENCY_BAND_2GHZ) {
+                mWifiNative.disable5GHzFrequencies(true);
+                mDisabled5GhzFrequencies = true;
+            } else if ((mFrequencyBand.get() != WifiManager.WIFI_FREQUENCY_BAND_2GHZ)
+                && (mDisabled5GhzFrequencies)) {
+                mWifiNative.disable5GHzFrequencies(false);
+                mDisabled5GhzFrequencies = false;
+            }
             if (PDBG) {
                 logd("done set frequency band " + band);
             }
@@ -3904,21 +3928,6 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
 
         mContext.sendStickyBroadcastAsUser(intent, UserHandle.ALL);
     }
-
-    /*
-    void ageOutScanResults(int age) {
-        synchronized(mScanResultCache) {
-            // Trim mScanResults, which prevent WifiStateMachine to return
-            // obsolete scan results to queriers
-            long now = System.CurrentTimeMillis();
-            for (int i = 0; i < mScanResults.size(); i++) {
-                ScanResult result = mScanResults.get(i);
-                if ((result.seen > now || (now - result.seen) > age)) {
-                    mScanResults.remove(i);
-                }
-            }
-        }
-    }*/
 
     /**
      * Allow blacklist by BSSID
@@ -5938,8 +5947,6 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
                 case CMD_REMOVE_USER_CONFIGURATIONS:
                     deferMessage(message);
                     break;
-                case CMD_PNO_PERIODIC_SCAN:
-                    deferMessage(message);
                 case CMD_START_IP_PACKET_OFFLOAD:
                     if (mNetworkAgent != null) mNetworkAgent.onPacketKeepaliveEvent(
                             message.arg1,
@@ -5955,6 +5962,9 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
                     break;
                 case CMD_STOP_RSSI_MONITORING_OFFLOAD:
                     messageHandlingStatus = MESSAGE_HANDLING_STATUS_DISCARD;
+                    break;
+                case CMD_PNO_PERIODIC_SCAN:
+	             deferMessage(message);
                     break;
                 default:
                     loge("Error! unhandled message" + message);
@@ -8460,18 +8470,20 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
             // cause the roam to faile and the device to disconnect
             clearCurrentConfigBSSID("L2ConnectedState");
 
-            try {
-                mIpReachabilityMonitor = new IpReachabilityMonitor(
-                        mContext,
-                        mInterfaceName,
-                        new IpReachabilityMonitor.Callback() {
-                            @Override
-                            public void notifyLost(InetAddress ip, String logMsg) {
-                                sendMessage(CMD_IP_REACHABILITY_LOST, logMsg);
-                            }
-                        });
-            } catch (IllegalArgumentException e) {
-                Log.wtf("Failed to create IpReachabilityMonitor", e);
+            if (mIsWiFiIpReachabilityEnabled) {
+                try {
+                    mIpReachabilityMonitor = new IpReachabilityMonitor(
+                            mContext,
+                            mInterfaceName,
+                            new IpReachabilityMonitor.Callback() {
+                                @Override
+                                public void notifyLost(InetAddress ip, String logMsg) {
+                                    sendMessage(CMD_IP_REACHABILITY_LOST, logMsg);
+                                }
+                            });
+                } catch (IllegalArgumentException e) {
+                    Log.wtf("Failed to create IpReachabilityMonitor", e);
+                }
             }
         }
 
