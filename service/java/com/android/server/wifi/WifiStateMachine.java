@@ -853,6 +853,9 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
        a saved/open network in suspend mode */
     static final int CMD_PNO_PERIODIC_SCAN                              = BASE + 165;
 
+    /* Is IBSS mode supported by the driver? */
+    static final int CMD_GET_IBSS_SUPPORTED                             = BASE + 200;
+
     /* Wifi state machine modes of operation */
     /* CONNECT_MODE - connect to any 'known' AP when it becomes available */
     public static final int CONNECT_MODE = 1;
@@ -860,9 +863,6 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
     public static final int SCAN_ONLY_MODE = 2;
     /* SCAN_ONLY_WITH_WIFI_OFF - scan, but don't connect to any APs */
     public static final int SCAN_ONLY_WITH_WIFI_OFF_MODE = 3;
-
-    /* Is IBSS mode supported by the driver? */
-    static final int CMD_GET_IBSS_SUPPORTED  
 
     private static final int SUCCESS = 1;
     private static final int FAILURE = -1;
@@ -6707,6 +6707,9 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
                 case WifiMonitor.ANQP_DONE_EVENT:
                     mWifiConfigStore.notifyANQPDone((Long) message.obj, message.arg1 != 0);
                     break;
+                case CMD_GET_IBSS_SUPPORTED:
+                    replyToMessage(message, message.what, mIbssSupported ? 1 : 0);
+                    break;
                 case CMD_STOP_IP_PACKET_OFFLOAD: {
                     int slot = message.arg1;
                     int ret = stopWifiIPPacketOffload(slot);
@@ -6715,9 +6718,6 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
                     }
                     break;
                 }
-                case CMD_GET_IBSS_SUPPORTED:
-                    replyToMessage(message, message.what, mIbssSupported ? 1 : 0);
-                    break;
                 default:
                     return NOT_HANDLED;
             }
